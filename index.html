@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>点堆动力学方程数值解</title>
+    <link rel="stylesheet" href="https://www.w3schools.com/w3css/4/w3.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+    <style>
+        .xsTxt {text-align: justify; text-indent: 2em;}
+        svg { font-family: sans-serif; }
+        .dot { fill: #5b8cff; }
+        .line { fill: none; stroke: #5b8cff; stroke-width: 2; }
+        .axis path, .axis line { stroke: #999; }
+        .grid line {
+            stroke: #ddd;
+            stroke-opacity: 0.8;
+            shape-rendering: crispEdges;
+        }
+
+        .grid path {
+            display: none;
+        }
+
+    </style>
+</head>
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" integrity="sha384-5TcZemv2l/9On385z///+d7MSYlvIEw9FuZTIdZ14vJLqWphw7e7ZPuOiCHJcFCP" crossorigin="anonymous">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js" integrity="sha384-cMkvdD8LoxVzGF/RPUKAcvmm49FQ0oxwDF3BGKtDXcEc+T1b2N+teh/OJfpU0jr6" crossorigin="anonymous"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/contrib/auto-render.min.js" integrity="sha384-hCXGrW6PitJEwbkoStFjeJxv+fSOOQKOPbJxSfM6G5sWZjAyWhXiTIIAmQqnlLlh" crossorigin="anonymous"
+        onload="renderMathInElement(document.body);"></script>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        renderMathInElement(document.body, {
+            // customised options
+            // • auto-render specific keys, e.g.:
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false},
+                {left: '\\(', right: '\\)', display: false},
+                {left: '\\[', right: '\\]', display: true}
+            ],
+            // • rendering keys, e.g.:
+            throwOnError : false
+        });
+    });
+</script>
+<body>
+
+<div class="w3-content" style="max-width:2000px; margin-top:46px">
+    <div class="w3-container w3-content w3-center w3-padding-32" style="max-width:800px" id="xf">
+        <h2 class="w3-wide">点堆动力学方程</h2>
+        <br>
+        <br>
+        <p class="xsTxt">此处展示了一个求解点堆动力学方程的demo。点堆模型是计算反应堆瞬态行为的一个重要模型，通常求解的六组缓发中子对应的点堆方程为：
+            $$\begin{cases}
+            \displaystyle \frac{\mathrm d n(t)}{\mathrm d t}=\frac{\rho(t)-\beta_{\mathrm{eff}}}{\Lambda}n+\sum_{i=1}^6 \lambda_i C_i\\
+            \displaystyle \frac{\mathrm d C_i(t)}{\mathrm d t} = \frac{\beta_{i,\mathrm{eff}}}{\Lambda}n-\lambda_i C_i
+            \end{cases}$$
+        </p>
+        <p class="xsTxt">反应堆的典型参数已预先设置好，点击“开始计算”按钮即可绘制中子密度随时间的变化曲线。</p>
+        <hr>
+        <div id="editor" class="w3-panel w3-light-gray w3-round w3-padding-24" style="text-align: left; display: none">
+            <label><b>求解方法</b></label>
+            <br>
+            <input id="ross" class="w3-radio" type="radio" name="method" checked>
+            <label>四阶刚性稳定Rosenbrock法</label>
+            <br>
+            <input class="w3-radio" type="radio" name="method">
+            <label>八阶变步长Runge-Kutta法（不稳定，仅供演示用）</label>
+            <br>
+            <br>
+            <label><b>起始时间</b>（秒）</label>
+            <input id="t1" class="w3-input w3-border" type="text">
+            <label><b>终止时间</b>（秒）</label>
+            <input id="t2" class="w3-input w3-border" type="text">
+            <label><b>数据点数量</b>（设置为-1则按步长控制自动取点）</label>
+            <input id="nsave" class="w3-input w3-border" type="text">
+            <br>
+            <b>先驱核分组</b>
+            <div id="precursors">
+            </div>
+            <button class="w3-button w3-blue" onclick="addPrecursor()">添加分组</button>
+            <br>
+            <br>
+            <label><b>中子寿命</b>（秒）</label>
+            <input id="l" class="w3-input w3-border" type="text">
+
+            <label><b>反应性公式</b>（javascript语法）</label>
+            <input id="rho" class="w3-input w3-border" type="text">
+
+            <label><b>初始条件</b></label>
+            <br>
+            <input id="balance" class="w3-radio" type="radio" name="init_cond" value="balance" onclick="document.getElementById('custom_init').style.display = 'none'" checked>
+            <label>稳态</label>
+
+            <input class="w3-radio" type="radio" name="init_cond" value="custom" onclick="document.getElementById('custom_init').style.display = 'block'">
+            <label>自定义</label>
+            <input class="w3-input w3-border" type="text" id="custom_init" style="display:none">
+        </div>
+        <br>
+        <div id="buttons">
+            <button class="w3-button w3-green" onclick="window.my_main()">开始计算</button>
+            <button class="w3-button w3-blue" onclick="toggleDisplay('editor')">编辑参数</button>
+        </div>
+        <br>
+        <div id="chart-container">
+            <svg id="chart"></svg>
+        </div>
+        <button class="w3-button w3-cyan" onclick="show_data()">显示文本格式数据</button>
+        <br>
+        <br>
+        <textarea id="data" class="w3-input w3-border"></textarea>
+    </div>
+</div>
+
+<script>
+    function show_data() {
+        document.getElementById("data").value = JSON.stringify(data);
+    }
+    function toggleDisplay(id) {
+        let e = document.getElementById(id);
+        e.style.display = e.style.display === "none" ? "block" : "none";
+    }
+    let prec_len = 0;
+    function addPrecursor() {
+        let e = document.getElementById("precursors");
+        let e_child = document.createElement("div")
+        e_child.id = `p${prec_len}`;
+        e_child.className = "w3-card w3-padding w3-margin";
+        e_child.innerHTML = `
+                    <label><b>份额</b></label>
+                    <input class="beta" type="text">
+                    <label><b>衰变常数</b>（单位为每秒）</label>
+                    <input class="lambda" type="text">
+                    <br>
+                    <button class="w3-button w3-red" onclick="removePrecursor(${prec_len})">删除分组</button>
+        `;
+        e.appendChild(e_child);
+        ++prec_len;
+    }
+    function removePrecursor(p_i) {
+        document.getElementById(`p${p_i}`).remove();
+        for (let i = p_i + 1; i < prec_len; ++i) {
+            let e = document.getElementById(`p${i}`);
+            e.id = `p${i-1}`;
+            e.setAttribute("onclick", `removePrecursor(${i-1})`)
+        }
+        --prec_len;
+    }
+    function init_data() {
+        document.getElementById("l").value = "0.0005";
+        document.getElementById("rho").value = "Math.sin(t >= 1.0 ? 0.0025 : 0) - 0.0 * (n - 1)";
+        document.getElementById("t1").value = "0.0";
+        document.getElementById("t2").value = "10.0";
+        document.getElementById("nsave").value = "100";
+        let betas = [0.00021,0.00142,0.00127,0.00257,0.00075,0.00027];
+        let lambdas = [0.0124,0.0305,0.1114,0.3014,1.1363,3.0137];
+        for (let i = 0; i < 6; ++i) {
+            addPrecursor();
+            let e = document.getElementById(`p${i}`);
+            for (const node of e.childNodes) {
+                if (node.className === "lambda") node.value = lambdas[i];
+                if (node.className === "beta") node.value = betas[i];
+            }
+        }
+        document.getElementById("custom_init").value = "[1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]"
+    }
+    init_data()
+</script>
+
+<script type="module">
+    import init, { calc } from './pkg/runge_kutta.js';
+    const run_rk = async (x1,x2,y0,l,ls,bs,rs,ns,im) => {
+        await init();
+        return calc(x1, x2, y0, l, ls, bs, rs, ns, im);
+    }
+    async function main() {
+        clearData();
+        let implicit = document.getElementById("ross").checked;
+        let t1 = Number(document.getElementById("t1").value);
+        let t2 = Number(document.getElementById("t2").value);
+        let nsave = Number(document.getElementById("nsave").value);
+        let l = Number(document.getElementById("l").value);
+        let rho = document.getElementById("rho").value;
+        let betas = [];
+        let lambdas = [];
+        for (let i = 0; i < prec_len; ++i) {
+            let e = document.getElementById(`p${i}`);
+            for (const node of e.childNodes) {
+                if (node.className === "lambda") lambdas[lambdas.length] = Number(node.value);
+                if (node.className === "beta") betas[betas.length] = Number(node.value);
+            }
+        }
+        let init_cond = [];
+        if (document.getElementById("balance").checked) {
+            init_cond[0] = 1.0;
+            for (let i = 0; i < prec_len; ++i) {
+                init_cond[i + 1] = betas[i] / (l * lambdas[i]);
+            }
+        }
+        else {
+            init_cond = eval(document.getElementById("custom_init").value);
+        }
+        let res = await run_rk(t1, t2, init_cond, l, lambdas, betas, rho, nsave, implicit);
+        for (let i = 0; i < res.length / 2; ++i) {
+            addData({x: res[2 * i], y: res[2 * i + 1]});
+        }
+    }
+    window.my_main = main;
+</script>
+
+<script>
+    const margin = { top: 20, right: 30, bottom: 40, left: 50 };
+    let width = document.getElementById("chart-container").offsetWidth - margin.left - margin.right;
+    let height = width * 0.6;
+
+    const svg = d3.select('#chart')
+        .attr('width', width + margin.left + margin.right)
+        .attr('height', height + margin.top + margin.bottom);
+
+    const g = svg.append('g')
+        .attr('transform', `translate(${margin.left},${margin.top})`);
+
+    let data = [];
+
+    let xScale = d3.scaleLinear().range([0, width]);
+    let yScale = d3.scaleLinear().range([height, 0]);
+
+    const xAxisG = g.append('g')
+        .attr('class', 'axis x-axis')
+        .attr('transform', `translate(0,${height})`);
+
+    const yAxisG = g.append('g')
+        .attr('class', 'axis y-axis');
+
+    const xGridG = g.append('g')
+        .attr('class', 'grid x-grid')
+        .attr('transform', `translate(0,${height})`);
+
+    const yGridG = g.append('g')
+        .attr('class', 'grid y-grid');
+
+
+    const line = d3.line()
+        .x(d => xScale(d.x))
+        .y(d => yScale(d.y));
+
+    const linePath = g.append('path').attr('class', 'line');
+
+    const dotsG = g.append('g');
+
+    function updateScales() {
+        xScale.domain(d3.extent(data, d => d.x)).nice();
+        yScale.domain(d3.extent(data, d => d.y)).nice();
+    }
+
+    function render() {
+        updateScales();
+
+        xAxisG.call(d3.axisBottom(xScale));
+        yAxisG.call(d3.axisLeft(yScale));
+        xGridG.call(
+            d3.axisBottom(xScale)
+                .tickSize(-height)
+                .tickFormat('')
+        );
+
+        yGridG.call(
+            d3.axisLeft(yScale)
+                .tickSize(-width)
+                .tickFormat('')
+        );
+
+
+        linePath.datum(data).attr('d', line);
+
+        const dots = dotsG.selectAll('.dot').data(data);
+
+        dots.enter()
+            .append('circle')
+            .attr('class', 'dot')
+            .attr('r', 4)
+            .merge(dots)
+            .attr('cx', d => xScale(d.x))
+            .attr('cy', d => yScale(d.y));
+
+        dots.exit().remove();
+    }
+
+    function addData(point) {
+        data.push(point);
+        render();
+    }
+    function clearData() {
+        data = [];
+        render();
+    }
+
+    const zoom = d3.zoom()
+        .scaleExtent([0.5, 20])
+        .on('zoom', (event) => {
+            const zx = event.transform.rescaleX(xScale);
+            const zy = event.transform.rescaleY(yScale);
+
+            xAxisG.call(d3.axisBottom(zx));
+            yAxisG.call(d3.axisLeft(zy));
+            xGridG.call(
+                d3.axisBottom(zx)
+                    .tickSize(-height)
+                    .tickFormat('')
+            );
+
+            yGridG.call(
+                d3.axisLeft(zy)
+                    .tickSize(-width)
+                    .tickFormat('')
+            );
+
+
+            linePath
+                .attr('d', d3.line()
+                    .x(d => zx(d.x))
+                    .y(d => zy(d.y))(data));
+
+            dotsG.selectAll('.dot')
+                .attr('cx', d => zx(d.x))
+                .attr('cy', d => zy(d.y));
+        });
+
+    svg.call(zoom);
+
+    // 示例：快速追加数据
+    // let t = 0;
+    // setInterval(() => {
+    //     addData({ x: t, y: Math.sin(t / 5) * 10 + Math.random() });
+    //     if (Math.random() < 0.01) {
+    //         clearData();
+    //     }
+    //     t += 1;
+    // }, 1000);
+
+    window.addEventListener('resize', () => {
+        width = document.getElementById("chart-container").offsetWidth - margin.left - margin.right;
+        height = width * 0.6;
+
+        svg
+            .attr('width', width + margin.left + margin.right)
+            .attr('height', height + margin.top + margin.bottom);
+
+        xScale.range([0, width]);
+        yScale.range([height, 0]);
+
+        xAxisG.attr('transform', `translate(0,${height})`);
+        xGridG.attr('transform', `translate(0,${height})`);
+
+        render();
+    });
+
+</script>
+</body>
+</html>
