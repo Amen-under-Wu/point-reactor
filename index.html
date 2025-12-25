@@ -142,13 +142,20 @@
         ++prec_len;
     }
     function removePrecursor(p_i) {
-        document.getElementById(`p${p_i}`).remove();
+        document.getElementById(`p${p_i}`).id = "delete";
         for (let i = p_i + 1; i < prec_len; ++i) {
             let e = document.getElementById(`p${i}`);
             e.id = `p${i-1}`;
-            e.setAttribute("onclick", `removePrecursor(${i-1})`)
+            for (let c of e.childNodes) {
+                console.log(c.tagName)
+                if (c.tagName === "BUTTON") {
+                    c.setAttribute("onclick", `removePrecursor(${i-1})`);
+                    break;
+                }
+            }
         }
         --prec_len;
+        document.getElementById("delete").remove();
     }
     function init_data() {
         document.getElementById("l").value = "0.0005";
@@ -205,7 +212,11 @@
             init_cond = eval(document.getElementById("custom_init").value);
         }
         let res = await run_rk(t1, t2, init_cond, l, lambdas, betas, rho, nsave, implicit);
-        for (let i = 0; i < res.length / 2; ++i) {
+        let ll = res.length;
+        if (res[ll - 1] === res[ll - 3] && res[ll - 2] === res[ll - 4]) {
+            ll -= 2;
+        }
+        for (let i = 0; i < ll / 2; ++i) {
             addData({x: res[2 * i], y: res[2 * i + 1]});
         }
     }
@@ -362,3 +373,4 @@
 </script>
 </body>
 </html>
+
